@@ -108,7 +108,7 @@ static rsRetVal initHiredis(instanceData *pData, int bSilent)
 
 	server = (pData->server == NULL) ? "127.0.0.1" : (char*) pData->server;
 	DBGPRINTF("omhiredis: trying connect to '%s' at port %d\n", server, pData->port);
-    
+
 	struct timeval timeout = { 1, 500000 }; /* 1.5 seconds */
 	pData->conn = redisConnectWithTimeout(server, pData->port, timeout);
 	if (pData->conn->err) {
@@ -130,14 +130,19 @@ rsRetVal writeHiredis(uchar *message, instanceData *pData)
 	if(pData->conn == NULL)
 		CHKiRet(initHiredis(pData, 0));
 
-	reply = redisCommand(pData->conn, (char*)message);
+	//reply = redisCommand(pData->conn, "PUBLISH syslog %s", "{\"property\":\"hell world\"");
+	//reply = redisCommand(pData->conn, "PUBLISH syslog %s", message);
+	reply = redisCommand(pData->conn, "MULTI");
+	reply = redisCommand(pData->conn, "LPUSH syslog %s", message);
+	reply = redisCommand(pData->conn, "PUBLISH syslog %s", message);
+	reply = redisCommand(pData->conn, "EXEC");
 	if (reply->type == REDIS_REPLY_ERROR) {
 		errmsg.LogError(0, NO_ERRCODE, "omhiredis: %s", reply->str);
 		dbgprintf("omhiredis: %s\n", reply->str);
 		freeReplyObject(reply);
 		ABORT_FINALIZE(RS_RET_ERR);
 	} else {
-		freeReplyObject(reply); 
+		freeReplyObject(reply);
 	}
 
 finalize_it:
@@ -178,7 +183,7 @@ CODESTARTnewActInst
 	for(i = 0 ; i < actpblk.nParams ; ++i) {
 		if(!pvals[i].bUsed)
 			continue;
-	
+
 		if(!strcmp(actpblk.descr[i].name, "server")) {
 			pData->server = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
 		} else if(!strcmp(actpblk.descr[i].name, "serverport")) {
@@ -209,7 +214,7 @@ CODESTARTparseSelectorAct
 
 /* tell the engine we only want one template string */
 CODE_STD_STRING_REQUESTparseSelectorAct(1)
-	if(!strncmp((char*) p, ":omhiredis:", sizeof(":omhiredis:") - 1)) 
+	if(!strncmp((char*) p, ":omhiredis:", sizeof(":omhiredis:") - 1))
 		errmsg.LogError(0, RS_RET_LEGA_ACT_NOT_SUPPORTED,
 			"omhiredis supports only v6 config format, use: "
 			"action(type=\"omhiredis\" server=...)");
