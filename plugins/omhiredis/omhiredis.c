@@ -54,13 +54,15 @@ typedef struct _instanceData {
 	uchar *server;
 	int port;
 	uchar *tplName;
+	uchar *channel;
 } instanceData;
 
 
 static struct cnfparamdescr actpdescr[] = {
 	{ "server", eCmdHdlrGetWord, 0 },
 	{ "serverport", eCmdHdlrInt, 0 },
-	{ "template", eCmdHdlrGetWord, 1 }
+	{ "template", eCmdHdlrGetWord, 1 },
+	{ "channel", eCmdHdlrGetWord, 0 }
 };
 static struct cnfparamblk actpblk = {
 	CNFPARAMBLK_VERSION,
@@ -92,6 +94,7 @@ CODESTARTfreeInstance
 	closeHiredis(pData);
 	free(pData->server);
 	free(pData->tplName);
+	free(pData->channel);
 ENDfreeInstance
 
 
@@ -107,7 +110,10 @@ static rsRetVal initHiredis(instanceData *pData, int bSilent)
 	DEFiRet;
 
 	server = (pData->server == NULL) ? "127.0.0.1" : (char*) pData->server;
-	DBGPRINTF("omhiredis: trying connect to '%s' at port %d\n", server, pData->port);
+	DBGPRINTF("omhiredis: trying connect to '%s' at port %d to publish on %s\n",
+		server,
+		pData->port,
+		pData->channel);
 
 	struct timeval timeout = { 1, 500000 }; /* 1.5 seconds */
 	pData->conn = redisConnectWithTimeout(server, pData->port, timeout);
@@ -145,9 +151,17 @@ rsRetVal writeHiredis(uchar *message, instanceData *pData)
 	//reply = redisCommand(pData->conn, "PUBLISH syslog %s", message);
 	reply = redisCommand(pData->conn, "MULTI");
 	checkRedisCommandReply(reply);
-	reply = redisCommand(pData->conn, "LPUSH syslog %s", message);
+	reply = redisCommand(
+		pData->conn,
+		"LPUSH %s %s",
+		(char*) pData->channel,
+		message);
 	checkRedisCommandReply(reply);
-	reply = redisCommand(pData->conn, "PUBLISH syslog %s", message);
+	reply = redisCommand(
+		pData->conn,
+		"PUBLISH %s %s",
+		(char*) pData->channel,
+		message);
 	checkRedisCommandReply(reply);
 	reply = redisCommand(pData->conn, "EXEC");
 	checkRedisCommandReply(reply);
@@ -174,6 +188,7 @@ setInstParamDefaults(instanceData *pData)
 	pData->server = NULL;
 	pData->port = 6379;
 	pData->tplName = NULL;
+	pData->channel = NULL;
 }
 
 BEGINnewActInst
@@ -193,6 +208,8 @@ CODESTARTnewActInst
 
 		if(!strcmp(actpblk.descr[i].name, "server")) {
 			pData->server = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
+		} else if(!strcmp(actpblk.descr[i].name, "channel")) {
+			pData->channel = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
 		} else if(!strcmp(actpblk.descr[i].name, "serverport")) {
 			pData->port = (int) pvals[i].val.d.n, NULL;
 		} else if(!strcmp(actpblk.descr[i].name, "template")) {
@@ -205,6 +222,12 @@ CODESTARTnewActInst
 
 	if(pData->tplName == NULL) {
 		dbgprintf("omhiredis: action requires a template name");
+		ABORT_FINALIZE(RS_RET_MISSING_CNFPARAMS);
+	}
+
+
+	if(pData->channel == NULL) {
+		dbgprintf("omhiredis: action requires a channel name");
 		ABORT_FINALIZE(RS_RET_MISSING_CNFPARAMS);
 	}
 
