@@ -122,6 +122,17 @@ finalize_it:
 	RETiRet;
 }
 
+
+#define checkRedisCommandReply(reply) \
+	if (reply->type == REDIS_REPLY_ERROR) { \
+		errmsg.LogError(0, NO_ERRCODE, "omhiredis: %s", reply->str); \
+		dbgprintf("omhiredis: %s\n", reply->str); \
+		freeReplyObject(reply); \
+		ABORT_FINALIZE(RS_RET_ERR); \
+	} else { \
+		freeReplyObject(reply); \
+	}
+
 rsRetVal writeHiredis(uchar *message, instanceData *pData)
 {
 	redisReply *reply;
@@ -133,17 +144,13 @@ rsRetVal writeHiredis(uchar *message, instanceData *pData)
 	//reply = redisCommand(pData->conn, "PUBLISH syslog %s", "{\"property\":\"hell world\"");
 	//reply = redisCommand(pData->conn, "PUBLISH syslog %s", message);
 	reply = redisCommand(pData->conn, "MULTI");
+	checkRedisCommandReply(reply);
 	reply = redisCommand(pData->conn, "LPUSH syslog %s", message);
+	checkRedisCommandReply(reply);
 	reply = redisCommand(pData->conn, "PUBLISH syslog %s", message);
+	checkRedisCommandReply(reply);
 	reply = redisCommand(pData->conn, "EXEC");
-	if (reply->type == REDIS_REPLY_ERROR) {
-		errmsg.LogError(0, NO_ERRCODE, "omhiredis: %s", reply->str);
-		dbgprintf("omhiredis: %s\n", reply->str);
-		freeReplyObject(reply);
-		ABORT_FINALIZE(RS_RET_ERR);
-	} else {
-		freeReplyObject(reply);
-	}
+	checkRedisCommandReply(reply);
 
 finalize_it:
 	RETiRet;
